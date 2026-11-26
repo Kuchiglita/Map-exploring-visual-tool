@@ -1,5 +1,7 @@
 """Independent trajectory checks and exact-solver cross comparisons."""
 import itertools
+from pathlib import Path
+import tempfile
 import json
 import subprocess
 import sys
@@ -128,6 +130,32 @@ class ExactTests(unittest.TestCase):
             for policy in ("stay","visit"):
                 for obj in ("makespan","soc"):
                     self.compare(["....."]*4,a,model,policy,obj,H=4)
+
+    def test_global_soc_and_unsolvable(self):
+        a=[(1,0,0,2,0,1),(1,2,0,0,0,3)]
+        for policy in ("stay","visit"):
+            self.compare(["...","..."],a,policy=policy,objective="soc",H=None)
+        for solver in ("cbs","mc-cbs","joint-bfs"):
+            self.assertEqual(solve([".."],[(1,0,0,1,0,1),(1,1,0,0,0,3)],solver)["status"],"UNSOLVABLE")
+
+    def test_wrapper_unicode_replay(self):
+        root=Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            folder=Path(tmp)/"карты и решения"
+            folder.mkdir()
+            case=folder/"сценарий.json"
+            out=folder/"результат.json"
+            viewer=folder/"просмотр.html"
+            case.write_text(json.dumps({"version":1,"grid":["..."],
+                "agents":[{"id":7,"size":1,"start":[0,0],"goal":[2,0],"heading":"E"}]}),encoding="utf-8")
+            subprocess.run([sys.executable,str(root/"solvers/run.py"),str(case),"--exe",EXE,
+                "--model","RM","--max-horizon","2","--out",str(out),"--viewer",str(viewer)],
+                check=True,capture_output=True,timeout=20,env={**__import__("os").environ,"PYTHONIOENCODING":"utf-8"})
+            data=json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual((data["status"],data["makespan"]),("OPTIMAL",2))
+            self.assertEqual(data["agents"][0]["id"],7)
+            self.assertTrue(out.with_suffix(".progress.jsonl").is_file())
+            self.assertNotIn("/*__DATA__*/",viewer.read_text(encoding="utf-8"))
 
     def test_random_small(self):
         rng=random.Random(42)

@@ -18,7 +18,7 @@ Requires CMake 3.16+, a C++17 compiler, Python 3.10+ (wrapper only). Same comman
 
     python solvers/run.py maps/elementary/demo-agents.json --solver mc-cbs --model PM --policy visit --objective makespan --max-horizon 30 --timeout-sec 120 --out runs/demo.json --viewer runs/demo.html
 
-The wrapper accepts the existing v1 JSON scenarios with grid or map reference. Every agent must have a goal. Optional heading: N/E/S/W or 0/1/2/3 (PM ignores it). --exe overrides automatic executable lookup; --build-dir and --maps-dir override defaults. The binary reads a simple text protocol on stdin; no third-party C++ JSON library. Run --help for options. No platform-specific code.
+The wrapper accepts the existing v1 JSON scenarios with grid or map reference. Every agent must have a goal. Optional heading: N/E/S/W or 0/1/2/3 (PM ignores it). Map Explorer v0.1 does not yet expose or preserve custom headings on re-export; set the heading directly in the scenario JSON for now. --exe overrides automatic executable lookup; --build-dir and --maps-dir override defaults. The binary reads a simple text protocol on stdin; no third-party C++ JSON library. Run --help for options. No platform-specific code.
 
 ## Algorithms
 

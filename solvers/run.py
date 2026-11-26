@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -75,11 +76,28 @@ def main():
         for k in ("solver", "model", "policy", "objective", "max_horizon", "max_soc",
                   "timeout_sec", "report_interval_sec"):
             cmd.extend(["--" + k.replace("_", "-"), str(getattr(args, k))])
-        cmd.extend(["--progress-file", str(progress.resolve())])
-        # stderr is inherited, so progress is visible live.
-        run = subprocess.run(cmd, input=encode(rows, agents), text=True,
-                             encoding="utf-8", stdout=subprocess.PIPE, check=True)
-        data = json.loads(run.stdout)
+        # Use Python's filesystem API for progress, not a narrow C++ argv path.
+        # File-backed stdin/stdout prevent pipe deadlocks on long trajectories.
+        with tempfile.TemporaryFile(mode="w+b") as src, tempfile.TemporaryFile(mode="w+b") as dst, progress.open("w", encoding="utf-8") as log:
+            src.write(encode(rows, agents).encode("utf-8"))
+            src.seek(0)
+            with subprocess.Popen(cmd, stdin=src, stdout=dst, stderr=subprocess.PIPE,
+                                  text=True, encoding="utf-8", errors="replace") as proc:
+                try:
+                    for line in proc.stderr:
+                        print(line, file=sys.stderr, end="", flush=True)
+                        if line.startswith("{"):
+                            log.write(line)
+                            log.flush()
+                except KeyboardInterrupt:
+                    proc.terminate()
+                    proc.wait()
+                    raise
+                code = proc.wait()
+                if code:
+                    raise subprocess.CalledProcessError(code, cmd)
+            dst.seek(0)
+            data = json.load(dst)
         data["grid"], data["agents"] = rows, agents
         args.out.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(json.dumps({k: data[k] for k in ("status", "makespan", "soc", "lower_bound",
