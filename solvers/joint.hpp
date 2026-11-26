@@ -69,7 +69,7 @@ inline Result joint_search(const Problem& p,const Options& o,Stats& st){
                 bool legal=true;
                 for(int j=0;j<i;++j){
                     if(p.overlap(cell(s),p.agents[i].size,cell(temp[j]),p.agents[j].size)||
-                       p.swap(i,j,cell(node.config[i]),cell(node.config[j]),cell(s),cell(temp[j])){legal=false;break;}
+                       p.swap(i,j,cell(node.config[i]),cell(node.config[j]),cell(s),cell(temp[j]))){legal=false;break;}
                 }
                 if(legal){temp[i]=s;gen(i+1);}
             }
