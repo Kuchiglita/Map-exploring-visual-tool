@@ -27,8 +27,8 @@ function panel(){
  if(!doc)return;const [w,h]=Geo.dims(doc.grid),free=c?c.reduce((n,v)=>n+(v>0),0):0;
  $("mapName").textContent=doc.name+(dirty?" *":"");$("stats").textContent=w+" × "+h+" · свободно "+free+" / "+w*h+" · агентов "+doc.agents.length;
  if(document.activeElement!==$("name"))$("name").value=doc.name;
- const a=active(),s=size(),sel=$("inspectSize"),values=[0,...new Set([1,3,5,7,9,...doc.agents.map(a=>a.size),...(inspect?[inspect]:[])])].sort((x,y)=>x-y);
- sel.replaceChildren(...values.map(v=>{let o=document.createElement("option");o.value=v;o.textContent=v?v+" × "+v:"Нет выделения";return o}));sel.value=String(s);
+ const a=active(),s=size(),sel=$("inspectSize"),values=[0,1,3,5,7,9,...(s>9?[s]:[])];
+ sel.replaceChildren(...values.map(v=>{let o=document.createElement("option");o.value=v;o.textContent=v?v+" × "+v:"Выключена";o.disabled=v>9;return o}));sel.value=String(s);
  const root=$("agents");root.replaceChildren();for(const a of doc.agents){let b=document.createElement("button");b.classList.toggle("active",a.id===selected);b.style.borderLeft="4px solid "+color(a);b.textContent="#"+a.id+" · "+a.size+"×"+a.size+" · ("+a.start.join(", ")+")"+(a.goal?" → ("+a.goal.join(", ")+")":"");b.onclick=()=>choose(a.id);root.append(b)}
  if(!doc.agents.length)root.textContent="Агентов нет";
  for(const b of $("tools").querySelectorAll("button[data-tool]"))b.classList.toggle("active",b.dataset.tool===tool);
@@ -106,7 +106,7 @@ $("tools").onclick=e=>{if(e.target.dataset.tool){tool=e.target.dataset.tool;over
 $("name").onchange=()=>{let n=$("name").value.trim();if(n&&n!==doc.name)change(()=>doc.name=n);else panel()};
 $("deleteAgent").onclick=()=>{if(active())change(()=>{doc.agents=doc.agents.filter(a=>a.id!==selected);resetSelection()})};
 $("clearGoal").onclick=()=>{if(active())change(()=>active().goal=null)};
-$("inspectSize").onchange=e=>guard(()=>setSize(Number(e.target.value)));$("inspect").onclick=()=>guard(()=>setSize(Number($("customSize").value)));
+$("inspectSize").onchange=e=>guard(()=>setSize(Number(e.target.value)));
 $("components").onclick=()=>{if(!size())inspect=1;overlay=overlay==="components"?"":"components";source=null;field=null;tool="select";panel();draw()};
 $("distances").onclick=()=>{if(!size())inspect=1;overlay=overlay==="distance"?"":"distance";source=null;field=null;tool="select";panel();draw()};
 $("reset").onclick=()=>{resetSelection();panel();draw()};
