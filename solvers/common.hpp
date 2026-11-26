@@ -31,6 +31,7 @@ struct Options {
     Cost max_soc=-1;
     double timeout=300, report=60;
     std::string progress_file;
+    std::uint32_t seed=1;
     bool rm() const { return model=="RM"; }
     bool visit() const { return policy=="visit"; }
     bool soc() const { return objective=="soc"; }
@@ -134,6 +135,7 @@ struct Stats {
     Clock::time_point start=Clock::now();
     double last=0;
     std::uint64_t ct_generated=0,ct_expanded=0,ll_calls=0,ll_expanded=0,joint_generated=0,joint_expanded=0,open=0,polls=0;
+    std::uint64_t lazy_attempts=0,lazy_failed=0;
     int horizon=-1;
     Cost lb=0,ub=INF;
     std::string phase="initialization";
@@ -150,6 +152,7 @@ struct Stats {
         s<<",\"ct_generated\":"<<ct_generated<<",\"ct_expanded\":"<<ct_expanded
          <<",\"low_level_calls\":"<<ll_calls<<",\"low_level_expanded\":"<<ll_expanded
          <<",\"joint_generated\":"<<joint_generated<<",\"joint_expanded\":"<<joint_expanded
+         <<",\"lazy_attempts\":"<<lazy_attempts<<",\"lazy_failed\":"<<lazy_failed
          <<",\"open\":"<<open<<"}";
         std::cerr<<s.str()<<std::endl;
         if(file.is_open()){file<<s.str()<<std::endl;}

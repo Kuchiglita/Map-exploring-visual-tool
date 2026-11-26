@@ -1,4 +1,4 @@
-# Exact LA-MAPF solvers
+# LA-MAPF solvers
 
 ## Discrete model (agreed 26.11.2026)
 
@@ -28,11 +28,21 @@ The wrapper accepts the existing v1 JSON scenarios with grid or map reference. E
 - Low-level A* minimizes completion time subject to constraints and extends the path to the common horizon, allowing Visit agents to move after completion. Reverse individual BFS gives a lower bound; RM includes heading. CT best-first by sum of individual completion times. Constraint sets deduplicated.
 - Makespan: try horizons from the individual maximum lower bound upward; the first feasible horizon is optimal. SOC: if a horizon/cost cap is specified, solve the fixed relevant horizon exactly. Otherwise first obtain an incumbent U, then solve at H=U (or a smaller proved finite state bound), since any better solution has makespan <= SOC < U. A finite state upper bound on the shortest solution is the product of individual augmented state counts minus one; computed only when representable. It is usually enormous. Without a usable bound CBS can time out on unsolvable instances.
 
+## LA-LaCAM (first-solution mode)
+
+    python solvers/run.py maps/elementary/demo-agents.json --solver lacam --model PM --policy visit --timeout-sec 30 --seed 1 --out runs/lacam.json --viewer runs/lacam.html
+
+An independent C++ adaptation of LaCAM's lazy constraint addition (Okumura, AAAI 2023, https://kei18.github.io/lacam/). It searches joint configurations, but expands only one partial next-configuration assignment at a time. A geometry-aware PIBT-like generator recursively displaces overlapping agents, including multiple blockers. Failed attempts roll back; constraints enumerate alternatives lazily, including fully specified valid joint moves. Only integer-time footprint conflicts and 1x1 swaps are forbidden. PM/RM and both goal policies use the common model.
+
+Unlike original DFS LaCAM, the outer queue is goal-directed best-first (size-weighted remaining individual distances, path length, retry penalty); candidate priorities favor unfinished large agents. Random tie-breaking is deterministic for a given seed/build. Stay initial commitment choices are also lazy. The generator is heuristic, but the full-prefix fallback and cap-aware dominance preserve exhaustive reachability on the finite augmented graph if allowed to finish. The first valid solution terminates search: FEASIBLE is a witnessed upper bound, not an optimality claim. OPTIMAL is returned only when independent lower bound equals its cost. No anytime improvement, approximation factor, or LaCAM* claim. With both caps, the key includes time and minimizes SOC; otherwise the relevant single cap cost (or time) dominates. Exhaustion can prove infeasibility; timeout cannot.
+
+LaCAM statistics: joint_generated (accepted labels), joint_expanded (prepared high-level nodes), lazy_attempts (prefixes processed), lazy_failed (failed configuration generation), open (agenda entries, may include stale labels). The lower bound remains the independent-agent bound, not the greedy priority. The --objective flag selects the cost reported as the upper/lower bound; it does not make this first-solution search optimize it. --seed defaults to 1. Do not impose a tight horizon when the initial purpose is just to find any feasible witness.
+
 ## Bounds and reporting
 
 --max-horizon N and --max-soc N are optional (-1 means no explicit bound). --timeout-sec defaults to 300 (0 disables). --report-interval-sec defaults to 60 (0 disables periodic reports, not the final report). A timeout never implies infeasibility. OPTIMAL and lower/upper bounds refer to the specified constraints; a capped-horizon SOC optimum need not be globally optimal without that cap. If no upper bound is known, it is null. Progress is JSON Lines on stderr and in <out>.progress.jsonl, including elapsed time, horizon, lower/upper bounds, CT generated/expanded, individual A* calls/expanded, joint generated/expanded and OPEN (outer frontier, approximate during child generation). Percent completion/ETA is not reported because search size is unknown. Lower bound is conservative; for global SOC before the proof phase it stays at the independent-agent bound. If all shorter makespan horizons fail, the next horizon is the proved lower bound. Verification and output serialization occur after search timeout checks; the timeout is not a hard process kill.
 
-Statuses: OPTIMAL, UNSOLVABLE (global proof), INFEASIBLE_WITHIN_HORIZON, INFEASIBLE_WITHIN_COST, INFEASIBLE_WITHIN_BOUNDS (both caps), TIMEOUT_WITH_SOLUTION, TIMEOUT_NO_SOLUTION, RESOURCE_LIMIT_WITH_SOLUTION, RESOURCE_LIMIT_NO_SOLUTION. A validated incumbent, if any, is retained at timeout during the global SOC proof phase. Bad input/errors exit nonzero.
+Statuses: FEASIBLE (validated solution without optimality proof), OPTIMAL, UNSOLVABLE (global proof), INFEASIBLE_WITHIN_HORIZON, INFEASIBLE_WITHIN_COST, INFEASIBLE_WITHIN_BOUNDS (both caps), TIMEOUT_WITH_SOLUTION, TIMEOUT_NO_SOLUTION, RESOURCE_LIMIT_WITH_SOLUTION, RESOURCE_LIMIT_NO_SOLUTION. A validated incumbent, if any, is retained at timeout during the global SOC proof phase. Bad input/errors exit nonzero.
 
 ## Results and replay
 

@@ -86,3 +86,5 @@ Node.js нужен только для тестов разработчика, н
 ## Exact solver baseline
 
 См. [solvers/README.md](solvers/README.md). C++17/CMake, PM/RM, Visit/Stay, makespan/SOC; Joint BFS/Dijkstra, CBS, MC-CBS ASYM, прогресс JSONL, отдельный HTML replay. Статусы строго различают доказанную неразрешимость, ограниченный поиск и timeout. Запуск через Python-обёртку; никакой обязательной ОС.
+
+- `--solver lacam`: LA-LaCAM, ленивый поиск первого допустимого решения / верхней оценки. PM/RM, Visit/Stay, `--seed`, существующий replay. Не LaCAM*.

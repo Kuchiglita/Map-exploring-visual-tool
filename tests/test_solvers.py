@@ -21,7 +21,7 @@ def solve(grid, agents, solver="mc-cbs", model="PM", policy="visit", objective="
         cmd += ["--max-soc", str(S)]
     run = subprocess.run(cmd, input=text, capture_output=True, text=True, timeout=20, check=True)
     result = json.loads(run.stdout)
-    if result["status"] not in ("OPTIMAL", "UNSOLVABLE", "INFEASIBLE_WITHIN_HORIZON",
+    if result["status"] not in ("FEASIBLE", "OPTIMAL", "UNSOLVABLE", "INFEASIBLE_WITHIN_HORIZON",
                                "INFEASIBLE_WITHIN_COST", "INFEASIBLE_WITHIN_BOUNDS"):
         raise AssertionError(result)
     if result["paths"] is not None:
@@ -71,7 +71,9 @@ def verify(grid, agents, result, model, policy):
                 assert not (paths[i][t-1][:2]==b[:2] and paths[j][t-1][:2]==a[:2])
     assert max(arrivals)==result["makespan"]
     assert sum(arrivals)==result["soc"]
-    assert result["lower_bound"]==result["upper_bound"]
+    assert result["lower_bound"]<=result["upper_bound"]
+    if result["status"]=="OPTIMAL":
+        assert result["lower_bound"]==result["upper_bound"]
     assert result["upper_bound"]==result[result["objective"]]
 
 @unittest.skipUnless(EXE, "run with solver executable or through CTest")
@@ -164,6 +166,66 @@ class ExactTests(unittest.TestCase):
             agents=[(1,s%3,s//3,g%3,g//3,rng.randrange(4)) for s,g in zip(starts,goals)]
             for obj in ("makespan","soc"):
                 self.compare(["...","..."],agents,policy=rng.choice(["visit","stay"]),objective=obj,H=4)
+
+@unittest.skipUnless(EXE, "run with solver executable or through CTest")
+class LaCAMTests(unittest.TestCase):
+    def compare(self, grid, agents, model="PM", policy="visit", objective="makespan", H=None, S=None):
+        exact=solve(grid,agents,"joint-bfs",model,policy,objective,H,S)
+        lazy=solve(grid,agents,"lacam",model,policy,objective,H,S)
+        self.assertEqual(exact["paths"] is not None,lazy["paths"] is not None,(exact,lazy))
+        if lazy["paths"] is not None:
+            self.assertLessEqual(exact[objective],lazy[objective])
+            self.assertLessEqual(lazy["lower_bound"],exact[objective])
+            if H is not None:self.assertLessEqual(lazy["makespan"],H)
+            if S is not None:self.assertLessEqual(lazy["soc"],S)
+        return lazy
+
+    def test_swap_and_cycle(self):
+        a=[(1,0,0,1,0,1),(1,1,0,0,0,3)]
+        self.assertEqual(self.compare([".."],a)["status"],"UNSOLVABLE")
+        self.compare([".."],a,H=3,S=5)
+        a=[(1,0,0,1,0,1),(1,1,0,1,1,2),(1,1,1,0,1,3),(1,0,1,0,0,0)]
+        for model in ("PM","RM"):
+            self.assertEqual(self.compare(["..",".."],a,model=model,H=1)["makespan"],1)
+
+    def test_large_agents(self):
+        a=[(5,2,2,3,2,1),(5,7,2,8,2,1)]
+        self.compare(["."*11]*5,a,H=1)
+        a=[(5,2,2,3,2,1),(5,7,6,7,7,2)]
+        self.compare(["."*10]*10,a,H=1)
+        a=[(3,1,1,4,1,1),(3,4,1,1,1,3)]
+        self.assertEqual(self.compare(["......"]*3,a)["status"],"UNSOLVABLE")
+
+    def test_visit_stay_and_initial_commitment(self):
+        a=[(1,2,0,2,0,1),(1,0,0,3,0,1)]
+        self.compare(["....."],a,policy="visit",H=4,S=3)
+        self.compare(["....."],a,policy="stay",H=4)
+        # Agent initially on goal has to vacate and return; the alternative
+        # initial uncommitted state must be explored in Stay.
+        a=[(1,1,0,1,0,2),(1,0,0,2,0,1)]
+        self.compare(["...","#.#"],a,policy="stay",H=4,S=8)
+        a=[(1,0,0,0,0,0),(1,1,0,1,0,0)]
+        self.compare([".."],a,policy="stay",H=0,S=0)
+
+    def test_random_small(self):
+        rng=random.Random(144)
+        for _ in range(15):
+            starts=rng.sample(range(6),2);goals=rng.sample(range(6),2)
+            a=[(1,s%3,s//3,g%3,g//3,rng.randrange(4)) for s,g in zip(starts,goals)]
+            for model in ("PM","RM"):
+                self.compare(["...","..."],a,model=model,policy=rng.choice(["visit","stay"]),
+                             objective=rng.choice(["makespan","soc"]),H=5,S=rng.randrange(2,11))
+        for H,S in [(None,None),(None,5),(5,None),(5,6)]:
+            self.compare(["...","..."],[(1,0,0,2,0,1),(1,2,0,0,0,3)],H=H,S=S)
+
+    def test_demo_upper_bound(self):
+        root=Path(__file__).resolve().parents[1]
+        grid=(root/"maps/elementary/demo.grid").read_text().splitlines()
+        a=[(1,3,2,19,2,0),(3,18,3,4,4,0),(5,4,8,18,8,0)]
+        r=solve(grid,a,"lacam")
+        self.assertIsNotNone(r["paths"],r)
+        print("LA-LaCAM demo:",{k:r[k] for k in ("status","makespan","soc","elapsed_sec",
+                                                 "joint_generated","lazy_attempts")},flush=True)
 
 if __name__=="__main__":
     if EXE is None:

@@ -18,3 +18,11 @@ jobs:
       - run: python -m unittest discover -s tests -p test_build.py
       - run: python visualization/build.py --out runs/explorer.html
       - run: python solvers/run.py maps/elementary/demo-agents.json --max-horizon 1 --timeout-sec 5 --out runs/smoke.json
+      - run: python solvers/run.py maps/elementary/demo-agents.json --solver lacam --timeout-sec 15 --out runs/lacam-demo.json --viewer runs/lacam-demo.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lacam-demo-${{ matrix.os }}
+          path: |
+            runs/lacam-demo.json
+            runs/lacam-demo.progress.jsonl
+            runs/lacam-demo.html

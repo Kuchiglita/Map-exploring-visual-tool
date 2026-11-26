@@ -1,5 +1,6 @@
 #include "cbs.hpp"
 #include "joint.hpp"
+#include "lacam.hpp"
 #include <cmath>
 #include <cstdlib>
 
@@ -10,9 +11,9 @@ int main(int argc,char** argv){
         for(int i=1;i<argc;++i){
             std::string k=argv[i];
             if(k=="--help"){
-                std::cout<<"la_solver --solver mc-cbs|cbs|joint-bfs --model PM|RM --policy visit|stay "
+                std::cout<<"la_solver --solver mc-cbs|cbs|joint-bfs|lacam --model PM|RM --policy visit|stay "
                     "--objective makespan|soc --max-horizon N --max-soc N --timeout-sec S --report-interval-sec S "
-                    "--progress-file PATH\nInput: width height agents, grid rows, then size sx sy gx gy heading per agent\n";
+                    "--seed N --progress-file PATH\nInput: width height agents, grid rows, then size sx sy gx gy heading per agent\n";
                 return 0;
             }
             if(i+1==argc)throw std::runtime_error("missing value for "+k);
@@ -25,10 +26,11 @@ int main(int argc,char** argv){
             else if(k=="--max-soc")o.max_soc=std::stoll(v);
             else if(k=="--timeout-sec")o.timeout=std::stod(v);
             else if(k=="--report-interval-sec")o.report=std::stod(v);
+            else if(k=="--seed"){auto seed=std::stoull(v);if(seed>std::numeric_limits<std::uint32_t>::max())throw std::runtime_error("invalid seed");o.seed=std::uint32_t(seed);}
             else if(k=="--progress-file")o.progress_file=v;
             else throw std::runtime_error("unknown option "+k);
         }
-        if(o.solver!="mc-cbs"&&o.solver!="cbs"&&o.solver!="joint-bfs")throw std::runtime_error("unknown solver");
+        if(o.solver!="mc-cbs"&&o.solver!="cbs"&&o.solver!="joint-bfs"&&o.solver!="lacam")throw std::runtime_error("unknown solver");
         if(o.model!="PM"&&o.model!="RM")throw std::runtime_error("unknown model");
         if(o.policy!="stay"&&o.policy!="visit")throw std::runtime_error("unknown policy");
         if(o.objective!="makespan"&&o.objective!="soc")throw std::runtime_error("unknown objective");
@@ -40,6 +42,7 @@ int main(int argc,char** argv){
         Stats st(o);Result result;
         try{
             if(o.solver=="joint-bfs")result=joint_search(p,o,st);
+            else if(o.solver=="lacam")lazy_search(p,o,st,result);
             else cbs_search(p,o,st,result);
         }catch(const Timeout&){
             result.status=result.has_solution?"TIMEOUT_WITH_SOLUTION":"TIMEOUT_NO_SOLUTION";
@@ -62,7 +65,8 @@ int main(int argc,char** argv){
         std::cout<<",\"elapsed_sec\":"<<st.elapsed()<<",\"ct_expanded\":"<<st.ct_expanded
             <<",\"ct_generated\":"<<st.ct_generated<<",\"low_level_calls\":"<<st.ll_calls
             <<",\"low_level_expanded\":"<<st.ll_expanded<<",\"joint_generated\":"<<st.joint_generated
-            <<",\"joint_expanded\":"<<st.joint_expanded<<",\"makespan\":";
+            <<",\"joint_expanded\":"<<st.joint_expanded<<",\"lazy_attempts\":"<<st.lazy_attempts
+            <<",\"lazy_failed\":"<<st.lazy_failed<<",\"seed\":"<<o.seed<<",\"makespan\":";
         if(result.has_solution)std::cout<<makespan;else std::cout<<"null";
         std::cout<<",\"soc\":";
         if(result.has_solution)std::cout<<soc;else std::cout<<"null";

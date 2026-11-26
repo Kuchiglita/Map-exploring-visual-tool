@@ -56,7 +56,7 @@ def main():
     p.add_argument("--exe", type=Path)
     p.add_argument("--build-dir", type=Path, default=ROOT / "build")
     p.add_argument("--maps-dir", type=Path, default=ROOT / "maps")
-    p.add_argument("--solver", choices=["mc-cbs", "cbs", "joint-bfs"], default="mc-cbs")
+    p.add_argument("--solver", choices=["mc-cbs", "cbs", "joint-bfs", "lacam"], default="mc-cbs")
     p.add_argument("--model", choices=["PM", "RM"], default="PM")
     p.add_argument("--policy", choices=["visit", "stay"], default="visit")
     p.add_argument("--objective", choices=["makespan", "soc"], default="makespan")
@@ -64,6 +64,7 @@ def main():
     p.add_argument("--max-soc", type=int, default=-1)
     p.add_argument("--timeout-sec", type=float, default=300)
     p.add_argument("--report-interval-sec", type=float, default=60)
+    p.add_argument("--seed", type=int, default=1)
     p.add_argument("--out", type=Path, default=Path("runs/solution.json"))
     p.add_argument("--viewer", type=Path, help="optional standalone HTML replay")
     args = p.parse_args()
@@ -74,7 +75,7 @@ def main():
         progress = args.out.with_suffix(".progress.jsonl")
         cmd = [str(exe)]
         for k in ("solver", "model", "policy", "objective", "max_horizon", "max_soc",
-                  "timeout_sec", "report_interval_sec"):
+                  "timeout_sec", "report_interval_sec", "seed"):
             cmd.extend(["--" + k.replace("_", "-"), str(getattr(args, k))])
         # Use Python's filesystem API for progress, not a narrow C++ argv path.
         # File-backed stdin/stdout prevent pipe deadlocks on long trajectories.
