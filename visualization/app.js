@@ -3,22 +3,23 @@
 const $=id=>document.getElementById(id), clone=x=>JSON.parse(JSON.stringify(x)), canvas=$("canvas"),ctx=canvas.getContext("2d"),stage=$("stage");
 const library=JSON.parse($("catalog").textContent);
 let doc=null,c=null,mode="library",tool="select",selected=null,inspect=0,overlay="",source=null,field=null,history=[],future=[],dirty=false,space=false,drag=null,cam={s:1,x:0,y:0};
-let viewport={w:1,h:1},palette=["#2563eb","#0f9567","#d98a17","#8a5cd6","#d34e6c","#12899a"];
-const color=a=>palette[a.id%palette.length], index=(x,y)=>y*doc.grid[0].length+x, active=()=>doc?.agents.find(a=>a.id===selected), size=()=>active()?.size||inspect;
+let viewport={w:1,h:1};
+const palette=["#2a78d6","#1baf7a","#e39b0b","#8a5cd6"];
+const color=a=>palette[(a.size-1)/2]??"hsl("+(((a.size-9)/2*137.508+18)%360)+",58%,45%)", index=(x,y)=>y*doc.grid[0].length+x, active=()=>doc?.agents.find(a=>a.id===selected), size=()=>active()?.size||inspect;
 function status(s="",error=false){$("status").textContent=s;$("status").classList.toggle("error",error)}
 function guard(fn){try{fn()}catch(e){status(e.message,true)}}
 function snapshot(){return clone(doc)}
 function remember(old){history.push(old);if(history.length>80)history.shift();future=[];dirty=true}
 function refresh(){c=Geo.clearance(doc.grid);field=null;if(source!==null&&source>=c.length)source=null;panel();draw()}
 function resetSelection(){selected=null;inspect=0;overlay="";source=null;field=null}
-function switchMode(m){mode=m;$("library").hidden=m!=="library";$("workspace").hidden=m==="library";$("editor").hidden=m!=="edit";for(const t of ["library","view","edit"])$(t+"Tab").classList.toggle("active",m===t);if(m==="library")renderLibrary();else{if(!doc){switchMode("library");return}tool="select";panel();requestAnimationFrame(()=>{resize();if(cam.s===1)fit()})}}
+function switchMode(m){mode=m;$("library").hidden=m!=="library";$("workspace").hidden=m==="library";$("editor").hidden=m!=="edit";$("historyControls").hidden=m!=="edit";$("downloadWrap").hidden=m==="library"||!doc;closeDownload();for(const t of ["library","view","edit"])$(t+"Tab").classList.toggle("active",m===t);if(m==="library")renderLibrary();else{if(!doc){switchMode("library");return}tool="select";panel();requestAnimationFrame(()=>{resize();if(cam.s===1)fit()})}}
 function open(entry,m="view"){if(dirty&&!confirm("Несохранённые изменения будут потеряны. Продолжить?"))return;doc=clone(entry);Geo.validate(doc.grid,doc.agents);history=[];future=[];dirty=false;resetSelection();cam={s:1,x:0,y:0};refresh();switchMode(m);requestAnimationFrame(fit);status("Карта открыта")}
 function renderLibrary(){
  const q=$("search").value.toLowerCase(),root=$("cards");root.replaceChildren();
  for(const entry of library.filter(e=>e.name.toLowerCase().includes(q))){
   const card=document.createElement("article");card.className="mapcard";const cv=document.createElement("canvas");cv.width=240;cv.height=125;const cx=cv.getContext("2d");const [w,h]=Geo.dims(entry.grid),s=Math.min(240/w,125/h),ox=(240-w*s)/2,oy=(125-h*s)/2;
   cx.fillStyle="#fff";cx.fillRect(ox,oy,w*s,h*s);cx.fillStyle="#384253";let free=0;for(let y=0;y<h;y++)for(let x=0;x<w;x++){if(entry.grid[y][x]==="#")cx.fillRect(ox+x*s,oy+y*s,Math.ceil(s),Math.ceil(s));else free++}
-  const title=document.createElement("strong");title.textContent=entry.name;const meta=document.createElement("div");meta.className="muted";meta.textContent=w+" × "+h+" · "+((1-free/(w*h))*100).toFixed(1)+"% стен"+(entry.agents.length?" · "+entry.agents.length+" аг.":"");const actions=document.createElement("div");actions.className="buttons";for(const [m,label] of [["view","Открыть"],["edit","Редактировать"]]){const b=document.createElement("button");b.textContent=label;b.onclick=e=>{e.stopPropagation();guard(()=>open(entry,m))};actions.append(b)}card.append(cv,title,meta,actions);card.onclick=()=>guard(()=>open(entry));root.append(card);
+  const title=document.createElement("strong");title.textContent=entry.name;const meta=document.createElement("div");meta.className="muted";meta.textContent=w+" × "+h+" · "+((1-free/(w*h))*100).toFixed(1)+"% стен"+(entry.agents.length?" · "+entry.agents.length+" аг.":"");const actions=document.createElement("div");actions.className="buttons";for(const [m,label] of [["view","Открыть"],["edit","Редактировать"]]){const b=document.createElement("button");b.textContent=label;b.onclick=e=>{e.stopPropagation();guard(()=>open(entry,m))};actions.append(b)}const remove=document.createElement("button");remove.className="icon-button remove-map";remove.innerHTML="<svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v6m4-6v6\"/></svg>";remove.title="Удалить из каталога сессии";remove.setAttribute("aria-label","Удалить из каталога сессии: "+entry.name);remove.onclick=e=>{e.stopPropagation();const i=library.indexOf(entry);if(i>=0){library.splice(i,1);renderLibrary();status("Удалено из временного каталога: "+entry.name)}};actions.append(remove);card.append(cv,title,meta,actions);card.onclick=()=>guard(()=>open(entry));root.append(card);
  }
  if(!root.children.length)root.textContent="Нет подходящих карт. Импортируйте файл или создайте новую.";
 }
@@ -30,7 +31,7 @@ function panel(){
  sel.replaceChildren(...values.map(v=>{let o=document.createElement("option");o.value=v;o.textContent=v?v+" × "+v:"Нет выделения";return o}));sel.value=String(s);
  const root=$("agents");root.replaceChildren();for(const a of doc.agents){let b=document.createElement("button");b.classList.toggle("active",a.id===selected);b.style.borderLeft="4px solid "+color(a);b.textContent="#"+a.id+" · "+a.size+"×"+a.size+" · ("+a.start.join(", ")+")"+(a.goal?" → ("+a.goal.join(", ")+")":"");b.onclick=()=>choose(a.id);root.append(b)}
  if(!doc.agents.length)root.textContent="Агентов нет";
- for(const b of $("tools").querySelectorAll("button"))b.classList.toggle("active",b.dataset.tool===tool);
+ for(const b of $("tools").querySelectorAll("button[data-tool]"))b.classList.toggle("active",b.dataset.tool===tool);
  $("undo").disabled=!history.length;$("redo").disabled=!future.length;$("deleteAgent").disabled=!a;$("clearGoal").disabled=!a||!a.goal;
  $("components").classList.toggle("active",overlay==="components");$("distances").classList.toggle("active",overlay==="distance");
  $("selection").textContent=s?(a?"Агент #"+a.id+" · ":"")+s+"×"+s+"\nДопустимые центры: "+c.reduce((n,v)=>n+(v>=s),0)+" / "+free:"Клик по агенту — его статическая эрозия.";
@@ -53,7 +54,7 @@ function draw(){
  if(s>=9){ctx.beginPath();ctx.strokeStyle="#7b889b44";ctx.lineWidth=1/s;for(let x=x0;x<=x1;x++){ctx.moveTo(x,y0);ctx.lineTo(x,y1)}for(let y=y0;y<=y1;y++){ctx.moveTo(x0,y);ctx.lineTo(x1,y)}ctx.stroke()}
  if(f&&overlay==="distance"&&s>=28){ctx.font=(11/s)+"px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++){let d=f.labels[y*w+x];if(d>=0){ctx.fillStyle=d/maxD>.62?"#fff":"#26364c";ctx.fillText(d,x+.5,y+.5)}}}
  for(const a of doc.agents)if(a.goal){let [x,y]=a.goal,k=a.size/2;ctx.strokeStyle=color(a);ctx.lineWidth=2/s;ctx.setLineDash([4/s,3/s]);ctx.strokeRect(x+.5-k+.08,y+.5-k+.08,a.size-.16,a.size-.16);ctx.setLineDash([]);ctx.beginPath();ctx.arc(x+.5,y+.5,.2,0,Math.PI*2);ctx.stroke()}
- for(const a of doc.agents){let [x,y]=a.start,k=a.size/2;ctx.globalAlpha=selected===null||selected===a.id?.88:.42;ctx.fillStyle=color(a);ctx.fillRect(x+.5-k+.05,y+.5-k+.05,a.size-.1,a.size-.1);ctx.globalAlpha=1;ctx.strokeStyle=selected===a.id?"#172337":color(a);ctx.lineWidth=(selected===a.id?3:1)/s;ctx.strokeRect(x+.5-k+.05,y+.5-k+.05,a.size-.1,a.size-.1);if(s*a.size>=24){ctx.fillStyle="#fff";ctx.textAlign="center";ctx.textBaseline="middle";ctx.font=Math.min(.65*a.size,14/s)+"px system-ui";ctx.fillText("#"+a.id,x+.5,y+.5)}}
+ for(const a of doc.agents){let [x,y]=a.start,k=a.size/2;ctx.globalAlpha=.88;ctx.fillStyle=color(a);ctx.fillRect(x+.5-k+.05,y+.5-k+.05,a.size-.1,a.size-.1);ctx.globalAlpha=1;ctx.strokeStyle=selected===a.id?"#172337":color(a);ctx.lineWidth=(selected===a.id?3:1)/s;ctx.strokeRect(x+.5-k+.05,y+.5-k+.05,a.size-.1,a.size-.1);if(s*a.size>=24){ctx.fillStyle="#fff";ctx.textAlign="center";ctx.textBaseline="middle";ctx.font=Math.min(.65*a.size,14/s)+"px system-ui";ctx.fillText("#"+a.id,x+.5,y+.5)}}
  if(source!==null&&overlay==="distance"){ctx.strokeStyle="#e35c2d";ctx.lineWidth=2/s;ctx.strokeRect(source%w,Math.floor(source/w),1,1)}
  if(drag?.kind==="rect"&&drag.end){let [x,y]=drag.start,[xx,yy]=drag.end;ctx.fillStyle="#38425355";ctx.fillRect(Math.min(x,xx),Math.min(y,yy),Math.abs(x-xx)+1,Math.abs(y-yy)+1)}
  ctx.restore();
@@ -90,7 +91,7 @@ function finish(e,cancel=false){if(!drag)return;let d=drag;drag=null;if(cancel){
  if(d.changed){remember(d.old);refresh()}else draw()
 }
 canvas.addEventListener("pointerup",e=>finish(e));canvas.addEventListener("pointercancel",e=>finish(e,true));
-window.addEventListener("keydown",e=>{if(["INPUT","SELECT","TEXTAREA"].includes(e.target.tagName))return;if(e.code==="Space"){space=true;e.preventDefault()}if(e.key==="Escape"&&doc){resetSelection();tool="select";panel();draw()}if(e.key.toLowerCase()==="f")fit();if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"&&mode==="edit"){e.preventDefault();restore(e.shiftKey)}});window.addEventListener("keyup",e=>{if(e.code==="Space")space=false});window.addEventListener("blur",()=>space=false);new ResizeObserver(resize).observe(stage);
+window.addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("downloadMenu").hidden){closeDownload();$("downloadToggle").focus();return}if(["INPUT","SELECT","TEXTAREA"].includes(e.target.tagName)||e.target.isContentEditable)return;if(e.code==="Space"){space=true;e.preventDefault()}if(e.key==="Escape"&&doc){resetSelection();tool="select";panel();draw()}if(e.key.toLowerCase()==="f")fit();if((e.ctrlKey||e.metaKey)&&!e.altKey&&mode==="edit"&&(e.code==="KeyZ"||e.key.toLowerCase()==="z")){e.preventDefault();if(!drag)restore(e.shiftKey)}});window.addEventListener("keyup",e=>{if(e.code==="Space")space=false});window.addEventListener("blur",()=>space=false);new ResizeObserver(resize).observe(stage);
 function restore(redo){let from=redo?future:history,to=redo?history:future;if(!from.length)return;to.push(snapshot());doc=from.pop();resetSelection();dirty=true;refresh()}
 function download(name,text,type){let url=URL.createObjectURL(new Blob([text],{type})),a=document.createElement("a");a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);status("Файл передан браузеру для скачивания")}
 function baseName(){return doc.name.split(/[\\/]/).pop().replace(/\.(grid|map|json)$/i,"").replace(/[<>:"|?*]/g,"_")||"map"}
@@ -109,8 +110,11 @@ $("inspectSize").onchange=e=>guard(()=>setSize(Number(e.target.value)));$("inspe
 $("components").onclick=()=>{if(!size())inspect=1;overlay=overlay==="components"?"":"components";source=null;field=null;tool="select";panel();draw()};
 $("distances").onclick=()=>{if(!size())inspect=1;overlay=overlay==="distance"?"":"distance";source=null;field=null;tool="select";panel();draw()};
 $("reset").onclick=()=>{resetSelection();panel();draw()};
-$("saveMap").onclick=()=>download(baseName()+".grid",doc.grid.join("\n")+"\n","text/plain;charset=utf-8");
-$("saveCase").onclick=()=>download(baseName()+".json",JSON.stringify({version:1,grid:doc.grid,agents:doc.agents},null,2)+"\n","application/json");
+function closeDownload(){ $("downloadMenu").hidden=true;$("downloadToggle").setAttribute("aria-expanded","false") }
+$("downloadToggle").onclick=()=>{const show=$("downloadMenu").hidden;$("downloadMenu").hidden=!show;$("downloadToggle").setAttribute("aria-expanded",String(show));if(show)$("saveMap").focus()};
+document.addEventListener("click",e=>{if(!$("downloadWrap").contains(e.target))closeDownload()});
+$("saveMap").onclick=()=>{closeDownload();download(baseName()+".grid",doc.grid.join("\n")+"\n","text/plain;charset=utf-8")};
+$("saveCase").onclick=()=>{closeDownload();download(baseName()+".json",JSON.stringify({version:1,grid:doc.grid,agents:doc.agents},null,2)+"\n","application/json")};
 $("addLibrary").onclick=()=>{library.push(snapshot());dirty=false;panel();status("Добавлено в каталог текущей сессии")};
 window.addEventListener("dragover",e=>{if(e.dataTransfer.types.includes("Files"))e.preventDefault()});window.addEventListener("drop",e=>{if(e.dataTransfer.files.length){e.preventDefault();importFiles(e.dataTransfer.files)}});
 window.addEventListener("beforeunload",e=>{if(dirty){e.preventDefault();e.returnValue=""}});
