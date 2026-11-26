@@ -50,3 +50,7 @@ python visualization/build.py --maps-dir maps
 ```
 
 Python 3.10+; команда и исходники одинаковы для Windows и Ubuntu. На Ubuntu при отсутствии алиаса python используйте python3. Подробности управления и форматов — [TOOLS.md](TOOLS.md).
+
+## Оптимальные солверы
+
+[C++ baseline: Joint BFS, CBS и MC-CBS ASYM](solvers/README.md). Сборка CMake, запуск по JSON-сценариям, статистика и автономный replay. См. документацию модели и ограничений поиска.

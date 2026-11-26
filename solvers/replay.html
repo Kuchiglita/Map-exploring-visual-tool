@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LA-MAPF Replay</title><style>
+*{box-sizing:border-box}body{margin:0;font:14px system-ui,sans-serif;color:#273244;height:100vh;display:flex;flex-direction:column;background:#e4e9ef}header,footer{background:white;display:flex;align-items:center;gap:10px;padding:10px 14px;flex-wrap:wrap}main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 245px}#stage{position:relative;min-height:0;overflow:hidden}canvas{width:100%;height:100%;display:block;touch-action:none}aside{padding:14px;overflow:auto;background:white;border-left:1px solid #dbe0e6}button,input,select{font:inherit}button{background:white;border:1px solid #dbe0e6;border-radius:6px;padding:6px 10px;cursor:pointer}#seek{flex:1;min-width:100px}#info{white-space:pre-line;line-height:1.6}#agents{display:flex;flex-direction:column;gap:5px}#agents button{text-align:left}#agents button.active{background:#e2edfc}.muted{color:#64748b;font-size:12px}@media(max-width:650px){main{grid-template-columns:1fr;grid-template-rows:1fr 160px}}</style></head>
+<body><header><strong>LA-MAPF Replay</strong><span id="summary"></span></header>
+<main><div id="stage"><canvas id="cv"></canvas></div><aside><strong>Агенты</strong><p id="info"></p><div id="agents"></div><p class="muted">Цвет по размеру. Пунктир — цель. Галочка — задача выполнена. Клик — выделить агента. Колесо — масштаб; перетаскивание — панорама.</p></aside></main>
+<footer><button id="back">◀</button><button id="play">▶</button><button id="next">▶|</button><input id="seek" type="range" min="0" value="0"><span id="time"></span><select id="speed"><option value="500">2 такта/с</option><option value="200" selected>5 тактов/с</option><option value="100">10 тактов/с</option></select><button id="fit">Вписать</button></footer>
+<script id="data" type="application/json">/*__DATA__*/</script><script>
+"use strict";
+const $=id=>document.getElementById(id), D=JSON.parse($("data").textContent),cv=$("cv"),ctx=cv.getContext("2d");
+const W=D.grid[0].length,H=D.grid.length,T=D.paths.length?D.paths[0].length-1:0;
+const pal=["#2a78d6","#1baf7a","#e39b0b","#8a5cd6"],color=a=>pal[(a.size-1)/2]??"hsl("+(((a.size-9)/2*137.508+18)%360)+",58%,45%)";
+let t=0,selected=-1,cam={s:1,x:0,y:0},vw=1,vh=1,timer=null,drag=null;
+$("summary").textContent=D.status+" · "+D.solver+" · "+D.motion_model+" · "+D.goal_policy+" · makespan "+D.makespan+" · SOC "+D.soc;
+$("seek").max=T;
+function draw(){
+ ctx.clearRect(0,0,vw,vh);ctx.save();ctx.translate(cam.x,cam.y);ctx.scale(cam.s,cam.s);ctx.fillStyle="#fbfcfd";ctx.fillRect(0,0,W,H);
+ ctx.fillStyle="#384253";for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(D.grid[y][x]==="#")ctx.fillRect(x,y,1,1);
+ if(cam.s>=9){ctx.beginPath();ctx.strokeStyle="#7b889b44";ctx.lineWidth=1/cam.s;for(let x=0;x<=W;x++){ctx.moveTo(x,0);ctx.lineTo(x,H)}for(let y=0;y<=H;y++){ctx.moveTo(0,y);ctx.lineTo(W,y)}ctx.stroke()}
+ for(let i=0;i<D.agents.length;i++){const a=D.agents[i],k=a.size/2,[gx,gy]=a.goal;ctx.strokeStyle=color(a);ctx.lineWidth=2/cam.s;ctx.setLineDash([4/cam.s,3/cam.s]);ctx.strokeRect(gx+.5-k+.08,gy+.5-k+.08,a.size-.16,a.size-.16);ctx.setLineDash([])}
+ if(selected>=0){let p=D.paths[selected];ctx.strokeStyle=color(D.agents[selected]);ctx.lineWidth=2/cam.s;ctx.beginPath();for(let j=0;j<=T;j++){let [x,y]=p[j];if(j===0)ctx.moveTo(x+.5,y+.5);else ctx.lineTo(x+.5,y+.5)}ctx.stroke()}
+ for(let i=0;i<D.agents.length;i++){const a=D.agents[i],[x,y,d,b]=D.paths[i][t],k=a.size/2;ctx.fillStyle=color(a);ctx.fillRect(x+.5-k+.05,y+.5-k+.05,a.size-.1,a.size-.1);ctx.strokeStyle=selected===i?"#172337":color(a);ctx.lineWidth=(selected===i?3:1)/cam.s;ctx.strokeRect(x+.5-k+.05,y+.5-k+.05,a.size-.1,a.size-.1);if(D.motion_model==="RM"){const dx=[0,1,0,-1],dy=[-1,0,1,0];ctx.strokeStyle="#172337";ctx.beginPath();ctx.moveTo(x+.5+dx[d]*(k-.3),y+.5+dy[d]*(k-.3));ctx.lineTo(x+.5+dx[d]*k,y+.5+dy[d]*k);ctx.stroke()}if(cam.s*a.size>=20){ctx.fillStyle="#fff";ctx.textAlign="center";ctx.textBaseline="middle";ctx.font=Math.min(a.size*.55,13/cam.s)+"px system-ui";ctx.fillText("#"+a.id+(b?" ✓":""),x+.5,y+.5)}}
+ ctx.restore();$("seek").value=t;$("time").textContent=t+" / "+T;
+ $("info").textContent=D.paths.filter(p=>p[t][3]).length+" / "+D.agents.length+" задач выполнено"+(selected<0?"":"\nАгент #"+D.agents[selected].id+" · ("+D.paths[selected][t].slice(0,2).join(", ")+")");
+ for(let i=0;i<D.agents.length;i++)$("agents").children[i].classList.toggle("active",i===selected);
+}
+for(let i=0;i<D.agents.length;i++){const a=D.agents[i],b=document.createElement("button");b.textContent="#"+a.id+" · "+a.size+"×"+a.size;b.style.borderLeft="4px solid "+color(a);b.onclick=()=>{selected=selected===i?-1:i;draw()};$("agents").append(b)}
+function fit(){cam.s=Math.max(.03,Math.min(70,(vw-30)/W,(vh-30)/H));cam.x=(vw-W*cam.s)/2;cam.y=(vh-H*cam.s)/2;draw()}
+function resize(){const r=cv.getBoundingClientRect(),d=devicePixelRatio||1;vw=r.width;vh=r.height;cv.width=Math.max(1,Math.round(vw*d));cv.height=Math.max(1,Math.round(vh*d));ctx.setTransform(d,0,0,d,0,0);fit()}
+function seek(v){t=Math.min(T,Math.max(0,v));draw()}
+function stop(){if(timer!==null)clearInterval(timer);timer=null;$("play").textContent="▶"}
+function play(){if(timer!==null){stop();return}if(t===T)seek(0);$("play").textContent="Ⅱ";timer=setInterval(()=>{if(t===T){stop();return}seek(t+1)},+$("speed").value)}
+$("seek").oninput=e=>seek(+e.target.value);$("back").onclick=()=>seek(t-1);$("next").onclick=()=>seek(t+1);$("play").onclick=play;$("fit").onclick=fit;$("speed").onchange=()=>{if(timer!==null){stop();play()}};
+cv.addEventListener("wheel",e=>{e.preventDefault();const r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top,s=Math.min(180,Math.max(.03,cam.s*Math.exp(-e.deltaY*.0015)));cam.x=x-(x-cam.x)*s/cam.s;cam.y=y-(y-cam.y)*s/cam.s;cam.s=s;draw()},{passive:false});
+cv.onpointerdown=e=>{drag={x:e.clientX,y:e.clientY,ox:cam.x,oy:cam.y,moved:false};cv.setPointerCapture(e.pointerId)};
+cv.onpointermove=e=>{if(!drag)return;let dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(Math.hypot(dx,dy)>4)drag.moved=true;if(drag.moved){cam.x=drag.ox+dx;cam.y=drag.oy+dy;draw()}};
+cv.onpointerup=e=>{if(drag&&!drag.moved){const r=cv.getBoundingClientRect(),x=Math.floor((e.clientX-r.left-cam.x)/cam.s),y=Math.floor((e.clientY-r.top-cam.y)/cam.s);selected=D.agents.findIndex((a,i)=>Math.abs(D.paths[i][t][0]-x)<a.size/2&&Math.abs(D.paths[i][t][1]-y)<a.size/2);draw()}drag=null};cv.onpointercancel=()=>drag=null;
+window.addEventListener("keydown",e=>{if(["INPUT","SELECT"].includes(e.target.tagName))return;if(e.code==="Space"){e.preventDefault();play()}if(e.key==="ArrowLeft")seek(t-1);if(e.key==="ArrowRight")seek(t+1);if(e.key==="Escape"){selected=-1;draw()}});
+new ResizeObserver(resize).observe(cv);resize();
+</script></body></html>
