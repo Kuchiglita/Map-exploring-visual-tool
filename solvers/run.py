@@ -50,6 +50,20 @@ def executable(build_dir):
             return p.resolve()
     raise ValueError("solver executable not found; build it using CMake or pass --exe")
 
+def write_json(path, data):
+    # Atomic replacement: a killed process leaves the previous witness intact.
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         delete=False, suffix=".tmp") as f:
+            tmp = Path(f.name)
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        tmp.replace(path)
+    finally:
+        if tmp is not None and tmp.exists():
+            tmp.unlink()
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("scenario", type=Path)
@@ -65,9 +79,12 @@ def main():
     p.add_argument("--timeout-sec", type=float, default=300)
     p.add_argument("--report-interval-sec", type=float, default=60)
     p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--anytime", action="store_true", help="continue LA-LaCAM after the first solution")
     p.add_argument("--out", type=Path, default=Path("runs/solution.json"))
     p.add_argument("--viewer", type=Path, help="optional standalone HTML replay")
     args = p.parse_args()
+    if args.anytime and args.solver != "lacam":
+        p.error("--anytime requires --solver lacam")
     try:
         rows, agents = load_case(args.scenario, args.maps_dir)
         exe = args.exe.resolve() if args.exe else executable(args.build_dir)
@@ -77,6 +94,9 @@ def main():
         for k in ("solver", "model", "policy", "objective", "max_horizon", "max_soc",
                   "timeout_sec", "report_interval_sec", "seed"):
             cmd.extend(["--" + k.replace("_", "-"), str(getattr(args, k))])
+        if args.anytime:
+            cmd.append("--anytime")
+        history = None
         # Use Python's filesystem API for progress, not a narrow C++ argv path.
         # File-backed stdin/stdout prevent pipe deadlocks on long trajectories.
         with tempfile.TemporaryFile(mode="w+b") as src, tempfile.TemporaryFile(mode="w+b") as dst, progress.open("w", encoding="utf-8") as log:
@@ -86,8 +106,20 @@ def main():
                                   text=True, encoding="utf-8", errors="replace") as proc:
                 try:
                     for line in proc.stderr:
+                        record = json.loads(line) if line.startswith("{") else None
+                        if record is not None and record.get("event") == "incumbent":
+                            record["grid"], record["agents"] = rows, agents
+                            if history is None:
+                                directory = args.out.with_suffix(".incumbents")
+                                directory.mkdir(parents=True, exist_ok=True)
+                                history = Path(tempfile.mkdtemp(prefix="run-", dir=directory))
+                                print(f"Incumbent history: {history}", flush=True)
+                            write_json(history / f"{record['improvements']:04d}.json", record)
+                            write_json(args.out, record)
+                            line = json.dumps({k: v for k, v in record.items()
+                                               if k not in ("paths", "grid", "agents")}) + "\n"
                         print(line, file=sys.stderr, end="", flush=True)
-                        if line.startswith("{"):
+                        if record is not None:
                             log.write(line)
                             log.flush()
                 except KeyboardInterrupt:
@@ -100,7 +132,7 @@ def main():
             dst.seek(0)
             data = json.load(dst)
         data["grid"], data["agents"] = rows, agents
-        args.out.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        write_json(args.out, data)
         print(json.dumps({k: data[k] for k in ("status", "makespan", "soc", "lower_bound",
                                               "upper_bound", "elapsed_sec")}, ensure_ascii=False))
         print(f"Result: {args.out}; progress: {progress}")

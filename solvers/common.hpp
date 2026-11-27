@@ -32,6 +32,7 @@ struct Options {
     double timeout=300, report=60;
     std::string progress_file;
     std::uint32_t seed=1;
+    bool anytime=false;
     bool rm() const { return model=="RM"; }
     bool visit() const { return policy=="visit"; }
     bool soc() const { return objective=="soc"; }
@@ -135,7 +136,7 @@ struct Stats {
     Clock::time_point start=Clock::now();
     double last=0;
     std::uint64_t ct_generated=0,ct_expanded=0,ll_calls=0,ll_expanded=0,joint_generated=0,joint_expanded=0,open=0,polls=0;
-    std::uint64_t lazy_attempts=0,lazy_failed=0;
+    std::uint64_t lazy_attempts=0,lazy_failed=0,improvements=0;
     int horizon=-1;
     Cost lb=0,ub=INF;
     std::string phase="initialization";
@@ -153,7 +154,7 @@ struct Stats {
          <<",\"low_level_calls\":"<<ll_calls<<",\"low_level_expanded\":"<<ll_expanded
          <<",\"joint_generated\":"<<joint_generated<<",\"joint_expanded\":"<<joint_expanded
          <<",\"lazy_attempts\":"<<lazy_attempts<<",\"lazy_failed\":"<<lazy_failed
-         <<",\"open\":"<<open<<"}";
+         <<",\"improvements\":"<<improvements<<",\"open\":"<<open<<"}";
         std::cerr<<s.str()<<std::endl;
         if(file.is_open()){file<<s.str()<<std::endl;}
     }
@@ -220,6 +221,21 @@ inline void verify(const Problem& p,const Options& o,const Paths& paths){
            (t&&p.swap(i,j,cell(paths[i][t-1]),cell(paths[j][t-1]),a,b)))
             throw std::logic_error("collision in solution");
     }
+}
+// Shared JSON trajectory serialization for final results and live checkpoints.
+inline void write_paths(std::ostream& out,const Problem& p,const Paths& paths){
+    out<<"[";
+    for(std::size_t i=0;i<paths.size();++i){
+        if(i)out<<",";
+        out<<"[";
+        for(std::size_t t=0;t<paths[i].size();++t){
+            if(t)out<<",";
+            int s=paths[i][t],v=cell(s);
+            out<<"["<<v%p.w<<","<<v/p.w<<","<<dir(s)<<","<<int(done(s))<<"]";
+        }
+        out<<"]";
+    }
+    out<<"]";
 }
 inline std::string bounded_failure(const Options& o){
     if(o.max_horizon>=0&&o.max_soc>=0)return "INFEASIBLE_WITHIN_BOUNDS";

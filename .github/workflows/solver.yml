@@ -19,6 +19,8 @@ jobs:
       - run: python visualization/build.py --out runs/explorer.html
       - run: python solvers/run.py maps/elementary/demo-agents.json --max-horizon 1 --timeout-sec 5 --out runs/smoke.json
       - run: python solvers/run.py maps/elementary/demo-agents.json --solver lacam --timeout-sec 15 --out runs/lacam-demo.json --viewer runs/lacam-demo.html
+      - run: python solvers/run.py maps/elementary/demo-agents.json --solver lacam --anytime --timeout-sec 10 --report-interval-sec 2 --out runs/lacam-anytime.json --viewer runs/lacam-anytime.html
+      - run: python -c "import json; d=json.load(open('runs/lacam-anytime.json')); assert d['paths'] is not None and d['makespan'] <= 35; assert d['lower_bound'] <= d['upper_bound']"
       - uses: actions/upload-artifact@v4
         with:
           name: lacam-demo-${{ matrix.os }}
@@ -26,3 +28,7 @@ jobs:
             runs/lacam-demo.json
             runs/lacam-demo.progress.jsonl
             runs/lacam-demo.html
+            runs/lacam-anytime.json
+            runs/lacam-anytime.progress.jsonl
+            runs/lacam-anytime.html
+            runs/lacam-anytime.incumbents/

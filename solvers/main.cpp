@@ -13,9 +13,10 @@ int main(int argc,char** argv){
             if(k=="--help"){
                 std::cout<<"la_solver --solver mc-cbs|cbs|joint-bfs|lacam --model PM|RM --policy visit|stay "
                     "--objective makespan|soc --max-horizon N --max-soc N --timeout-sec S --report-interval-sec S "
-                    "--seed N --progress-file PATH\nInput: width height agents, grid rows, then size sx sy gx gy heading per agent\n";
+                    "--seed N [--anytime] --progress-file PATH\nInput: width height agents, grid rows, then size sx sy gx gy heading per agent\n";
                 return 0;
             }
+            if(k=="--anytime"){o.anytime=true;continue;}
             if(i+1==argc)throw std::runtime_error("missing value for "+k);
             std::string v=argv[++i];
             if(k=="--solver")o.solver=v;
@@ -31,6 +32,7 @@ int main(int argc,char** argv){
             else throw std::runtime_error("unknown option "+k);
         }
         if(o.solver!="mc-cbs"&&o.solver!="cbs"&&o.solver!="joint-bfs"&&o.solver!="lacam")throw std::runtime_error("unknown solver");
+        if(o.anytime&&o.solver!="lacam")throw std::runtime_error("--anytime requires --solver lacam");
         if(o.model!="PM"&&o.model!="RM")throw std::runtime_error("unknown model");
         if(o.policy!="stay"&&o.policy!="visit")throw std::runtime_error("unknown policy");
         if(o.objective!="makespan"&&o.objective!="soc")throw std::runtime_error("unknown objective");
@@ -66,25 +68,13 @@ int main(int argc,char** argv){
             <<",\"ct_generated\":"<<st.ct_generated<<",\"low_level_calls\":"<<st.ll_calls
             <<",\"low_level_expanded\":"<<st.ll_expanded<<",\"joint_generated\":"<<st.joint_generated
             <<",\"joint_expanded\":"<<st.joint_expanded<<",\"lazy_attempts\":"<<st.lazy_attempts
-            <<",\"lazy_failed\":"<<st.lazy_failed<<",\"seed\":"<<o.seed<<",\"makespan\":";
+            <<",\"lazy_failed\":"<<st.lazy_failed<<",\"seed\":"<<o.seed
+            <<",\"anytime\":"<<(o.anytime?"true":"false")<<",\"improvements\":"<<st.improvements<<",\"makespan\":";
         if(result.has_solution)std::cout<<makespan;else std::cout<<"null";
         std::cout<<",\"soc\":";
         if(result.has_solution)std::cout<<soc;else std::cout<<"null";
         std::cout<<",\"paths\":";
-        if(!result.has_solution)std::cout<<"null";else{
-            std::cout<<"[";
-            for(int i=0;i<int(result.paths.size());++i){
-                if(i)std::cout<<",";
-                std::cout<<"[";
-                for(std::size_t t=0;t<result.paths[i].size();++t){
-                    if(t)std::cout<<",";
-                    int s=result.paths[i][t],v=cell(s);
-                    std::cout<<"["<<v%p.w<<","<<v/p.w<<","<<dir(s)<<","<<(done(s)?1:0)<<"]";
-                }
-                std::cout<<"]";
-            }
-            std::cout<<"]";
-        }
+        if(!result.has_solution)std::cout<<"null";else write_paths(std::cout,p,result.paths);
         std::cout<<"}\n";return 0;
     }catch(const std::exception& e){std::cerr<<"error: "<<e.what()<<std::endl;return 2;}
 }

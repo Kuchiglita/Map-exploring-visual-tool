@@ -19,11 +19,11 @@ struct LazyNode {
     std::deque<LazyPrefix> pending;
     std::size_t parent;
     int t;
-    Cost soc, heuristic;
+    Cost soc, heuristic, bound;
     std::uint64_t attempts=0;
     bool prepared=false;
-    LazyNode(std::vector<int> c,std::size_t p,int time,Cost cost,Cost h):
-        config(std::move(c)),parent(p),t(time),soc(cost),heuristic(h){}
+    LazyNode(std::vector<int> c,std::size_t p,int time,Cost cost,Cost h,Cost lb):
+        config(std::move(c)),parent(p),t(time),soc(cost),heuristic(h),bound(lb){}
 };
 inline bool lazy_conflict(const Problem& p,const std::vector<int>& cur,int i,int s,int j,int u){
     return p.overlap(cell(s),p.agents[i].size,cell(u),p.agents[j].size)||
@@ -105,6 +105,21 @@ inline std::optional<std::vector<int>> lazy_generate(const Problem& p,const Lazy
     for(int i:n.order)if(!assign(i))return std::nullopt;
     return out;
 }
+// A checkpoint is a complete, verified witness. Keep the final stdout
+// protocol unchanged: live witnesses are separate JSON events on stderr.
+inline void lazy_checkpoint(const Problem& p,const Options& o,Stats& st,const Result& result){
+    auto [makespan,soc]=costs(result.paths);
+    std::ostringstream s;
+    s<<"{\"event\":\"incumbent\",\"version\":1,\"status\":\""<<result.status
+     <<"\",\"solver\":\"lacam\",\"motion_model\":\""<<o.model<<"\",\"goal_policy\":\""<<o.policy
+     <<"\",\"objective\":\""<<o.objective<<"\",\"anytime\":true,\"seed\":"<<o.seed
+     <<",\"max_horizon\":"<<o.max_horizon<<",\"max_soc\":"<<o.max_soc
+     <<",\"improvements\":"<<st.improvements<<",\"elapsed_sec\":"<<st.elapsed()
+     <<",\"lower_bound\":"<<st.lb<<",\"upper_bound\":"<<st.ub
+     <<",\"makespan\":"<<makespan<<",\"soc\":"<<soc<<",\"paths\":";
+    write_paths(s,p,result.paths);s<<"}";
+    std::cerr<<s.str()<<std::endl;
+}
 inline void lazy_search(const Problem& p,const Options& o,Stats& st,Result& result){
     st.phase="lacam_initialization";
     const int N=int(p.agents.size());
@@ -129,14 +144,13 @@ inline void lazy_search(const Problem& p,const Options& o,Stats& st,Result& resu
     const auto first=estimate(root);
     if(!first.possible){result.status="UNSOLVABLE";return;}
     st.lb=o.soc()?first.hsum:first.hmax;
-    // High-level best-first guide is deliberately inadmissible. Only the
-    // independent distances above are reported as a proved lower bound.
-    // With both independent caps, retain time in the duplicate key and
-    // minimize SOC for that time. With one cap, its cost dominates.
-    const bool timed=o.max_horizon>=0&&o.max_soc>=0;
+    // The guide is inadmissible; proofs use a separate admissible frontier.
+    // If the non-objective cost is capped, retain time and minimize SOC
+    // at a fixed time. Otherwise the objective cost dominates.
+    const bool timed=(o.soc()&&o.max_horizon>=0)||(!o.soc()&&o.max_soc>=0);
     auto key=[&](const std::vector<int>& c,int t){auto k=c;if(timed)k.push_back(t);return k;};
     auto label=[&](int t,Cost soc){
-        return o.max_soc>=0?std::pair<Cost,Cost>{soc,t}:std::pair<Cost,Cost>{t,soc};
+        return (timed||o.soc())?std::pair<Cost,Cost>{soc,t}:std::pair<Cost,Cost>{t,soc};
     };
     using Item=std::tuple<Cost,Cost,std::uint64_t,std::size_t>;
     std::priority_queue<Item,std::vector<Item>,std::greater<Item>> open;
@@ -144,15 +158,25 @@ inline void lazy_search(const Problem& p,const Options& o,Stats& st,Result& resu
     std::unordered_map<std::vector<int>,std::size_t,VecHash> best;
     std::uint64_t serial=0,root_attempts=0;
     std::mt19937 rng(o.seed);
+    // Each scheduled lazy expansion has an admissible bound. Keeping stale
+    // dominated entries until popped is safe (only weakens the lower bound).
+    std::multiset<std::pair<Cost,std::uint64_t>> frontier;
+    auto schedule_item=[&](Cost score,Cost guide,Cost bound,std::size_t id){
+        const auto ticket=serial++;
+        open.emplace(score,guide,ticket,id);
+        if(o.anytime)frontier.emplace(bound,ticket);
+    };
     auto schedule=[&](std::size_t id){
         const auto& n=*nodes[id];
         Cost penalty=Cost(std::min<std::uint64_t>(n.attempts,1000000))/2;
-        open.emplace(n.heuristic+Cost(n.t)*2+penalty,n.heuristic,serial++,id);
+        schedule_item(n.heuristic+Cost(n.t)*2+penalty,n.heuristic,n.bound,id);
     };
     auto push=[&](std::vector<int> c,int t,Cost soc,std::size_t parent){
         auto e=estimate(c);
         if(!e.possible||(o.max_horizon>=0&&Cost(t)+e.hmax>o.max_horizon)||
            (o.max_soc>=0&&soc+e.hsum>o.max_soc))return;
+        Cost bound=o.soc()?soc+e.hsum:Cost(t)+e.hmax;
+        if(bound>=st.ub)return;
         auto k=key(c,t);auto it=best.find(k);
         if(it!=best.end()){
             const auto& old=*nodes[it->second];
@@ -163,17 +187,32 @@ inline void lazy_search(const Problem& p,const Options& o,Stats& st,Result& resu
             nodes[it->second]->order.clear();
         }
         auto id=nodes.size();
-        nodes.push_back(std::make_unique<LazyNode>(std::move(c),parent,t,soc,e.guide));
+        nodes.push_back(std::make_unique<LazyNode>(std::move(c),parent,t,soc,e.guide,bound));
         best[std::move(k)]=id;schedule(id);++st.joint_generated;
     };
     // Stay can have exponentially many valid initial commitment choices.
     // Generate them lazily as agenda items, rather than before search.
     bool more_roots=true;
-    open.emplace(first.guide,first.guide,serial++,sentinel);
+    const Cost root_bound=st.lb;
+    schedule_item(first.guide,first.guide,root_bound,sentinel);
     st.phase="lacam_search";
     while(!open.empty()){
-        st.open=open.size();st.tick(true);
+        st.open=open.size();
+        // Update only between complete lazy expansions. During an expansion
+        // the previous lower bound remains valid, including on timeout.
+        if(o.anytime){
+            st.lb=std::max(st.lb,std::min(st.ub,frontier.begin()->first));
+            if(result.has_solution&&st.lb==st.ub){
+                result.status="OPTIMAL";return;
+            }
+        }
+        st.tick(true);
         auto item=open.top();open.pop();auto id=std::get<3>(item);
+        if(o.anytime){
+            Cost bound=id==sentinel?root_bound:nodes[id]->bound;
+            frontier.erase({bound,std::get<2>(item)});
+            if(bound>=st.ub)continue;
+        }
         if(id==sentinel){
             if(!more_roots)continue;
             push(root,0,0,sentinel);++root_attempts;
@@ -183,8 +222,8 @@ inline void lazy_search(const Problem& p,const Options& o,Stats& st,Result& resu
                 digits[i]=0;root[i]=roots[i][0];
             }
             more_roots=i<N;
-            if(more_roots)open.emplace(first.guide+2+Cost(std::min<std::uint64_t>(root_attempts,1000000)),
-                                       first.guide,serial++,sentinel);
+            if(more_roots)schedule_item(first.guide+2+Cost(std::min<std::uint64_t>(root_attempts,1000000)),
+                                       first.guide,root_bound,sentinel);
             continue;
         }
         auto& n=*nodes[id];
@@ -196,9 +235,17 @@ inline void lazy_search(const Problem& p,const Options& o,Stats& st,Result& resu
                 for(int i=0;i<N;++i)paths[i].push_back(nodes[k]->config[i]);
             for(auto& path:paths)std::reverse(path.begin(),path.end());
             verify(p,o,paths);
-            st.ub=o.soc()?n.soc:n.t;
-            result={st.lb==st.ub?"OPTIMAL":"FEASIBLE",std::move(paths),true};
-            return;
+            const Cost value=o.soc()?n.soc:n.t;
+            if(value<st.ub){
+                st.ub=value;++st.improvements;
+                result={st.lb==st.ub?"OPTIMAL":"FEASIBLE",std::move(paths),true};
+                if(o.anytime){
+                    st.phase="lacam_improve";
+                    lazy_checkpoint(p,o,st,result);st.emit();
+                }
+            }
+            if(!o.anytime||st.lb==st.ub)return;
+            continue;
         }
         if(o.max_horizon>=0&&n.t>=o.max_horizon)continue;
         if(n.t>=std::numeric_limits<int>::max()-1)throw std::runtime_error("LaCAM horizon exceeds integer range");
@@ -229,6 +276,7 @@ inline void lazy_search(const Problem& p,const Options& o,Stats& st,Result& resu
         if(successor)push(std::move(*successor),n.t+1,new_soc,id);
         else ++st.lazy_failed;
     }
-    result.status=bounded_failure(o);
+    if(result.has_solution){st.lb=st.ub;result.status="OPTIMAL";}
+    else result.status=bounded_failure(o);
 }
 }

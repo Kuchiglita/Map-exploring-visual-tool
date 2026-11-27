@@ -10,11 +10,13 @@ import unittest
 
 EXE = sys.argv.pop(1) if __name__ == "__main__" and len(sys.argv) > 1 else None
 
-def solve(grid, agents, solver="mc-cbs", model="PM", policy="visit", objective="makespan", H=None, S=None):
+def solve(grid, agents, solver="mc-cbs", model="PM", policy="visit", objective="makespan", H=None, S=None, anytime=False):
     text = f"{len(grid[0])} {len(grid)} {len(agents)}\n" + "\n".join(grid) + "\n"
     text += "".join(" ".join(map(str, a)) + "\n" for a in agents)
     cmd = [EXE, "--solver", solver, "--model", model, "--policy", policy,
            "--objective", objective, "--timeout-sec", "15", "--report-interval-sec", "0"]
+    if anytime:
+        cmd += ["--anytime"]
     if H is not None:
         cmd += ["--max-horizon", str(H)]
     if S is not None:
@@ -217,6 +219,54 @@ class LaCAMTests(unittest.TestCase):
                              objective=rng.choice(["makespan","soc"]),H=5,S=rng.randrange(2,11))
         for H,S in [(None,None),(None,5),(5,None),(5,6)]:
             self.compare(["...","..."],[(1,0,0,2,0,1),(1,2,0,0,0,3)],H=H,S=S)
+
+    def test_anytime_optimum(self):
+        rng=random.Random(277)
+        for k in range(18):
+            starts=rng.sample(range(6),2);goals=rng.sample(range(6),2)
+            a=[(1,s%3,s//3,g%3,g//3,rng.randrange(4)) for s,g in zip(starts,goals)]
+            model=("PM","RM")[k%2]
+            policy=("visit","stay")[(k//2)%2]
+            for objective in ("makespan","soc"):
+                H,S=[(None,None),(None,7),(5,None),(5,7)][k%4]
+                exact=solve(["...","..."],a,"joint-bfs",model,policy,objective,H,S)
+                lazy=solve(["...","..."],a,"lacam",model,policy,objective,H,S,anytime=True)
+                self.assertEqual(exact["paths"] is not None,lazy["paths"] is not None,(exact,lazy))
+                if exact["paths"] is not None:
+                    self.assertEqual(lazy["status"],"OPTIMAL",lazy)
+                    self.assertEqual(exact[objective],lazy[objective],(exact,lazy))
+        a=[(5,2,2,3,2,1),(5,7,2,8,2,1)]
+        self.assertEqual(solve(["."*11]*5,a,"lacam",anytime=True)["makespan"],1)
+        a=[(1,0,0,1,0,1),(1,1,0,0,0,3)]
+        self.assertEqual(solve([".."],a,"lacam",anytime=True)["status"],"UNSOLVABLE")
+
+    def test_anytime_checkpoint(self):
+        root=Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            folder=Path(tmp)/"решения"
+            folder.mkdir()
+            out=folder/"best.json"
+            case=folder/"case.json"
+            case.write_text(json.dumps({"version":1,"grid":["...","..."],
+                "agents":[{"id":0,"size":1,"start":[0,0],"goal":[2,0]},
+                          {"id":1,"size":1,"start":[2,0],"goal":[0,0]}]}),encoding="utf-8")
+            subprocess.run([sys.executable,str(root/"solvers/run.py"),str(case),"--exe",EXE,
+                "--solver","lacam","--anytime","--out",str(out),"--viewer",str(folder/"best.html")],
+                check=True,capture_output=True,timeout=20,env={**__import__("os").environ,"PYTHONIOENCODING":"utf-8"})
+            final=json.loads(out.read_text(encoding="utf-8"))
+            snapshots=[json.loads(p.read_text(encoding="utf-8")) for p in
+                       sorted(out.with_suffix(".incumbents").glob("run-*/*.json"))]
+            self.assertEqual(final["status"],"OPTIMAL")
+            self.assertEqual(len(snapshots),final["improvements"])
+            self.assertGreaterEqual(len(snapshots),1)
+            self.assertEqual(snapshots[-1]["upper_bound"],final["upper_bound"])
+            self.assertTrue(all(a["upper_bound"]>b["upper_bound"] for a,b in zip(snapshots,snapshots[1:])))
+            for snap in snapshots:
+                verify(["...","..."],[(1,0,0,2,0,0),(1,2,0,0,0,0)],snap,"PM","visit")
+            log=[json.loads(line) for line in out.with_suffix(".progress.jsonl").read_text().splitlines()]
+            self.assertEqual(sum(r.get("event")=="incumbent" for r in log),len(snapshots))
+            self.assertTrue(all(a["lower_bound"]<=b["lower_bound"] for a,b in zip(log,log[1:])))
+            self.assertTrue((folder/"best.html").exists())
 
     def test_demo_upper_bound(self):
         root=Path(__file__).resolve().parents[1]
